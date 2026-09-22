@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'Kalpurush';
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 900;
+  src: url('https://fonts.maateen.me/kalpurush/Kalpurush-v0.258.woff2') format('woff2'),
+       url('https://fonts.maateen.me/kalpurush/Kalpurush-v0.258.ttf') format('truetype');
+}
+
+html, body {
+  min-width: 1240px;
+  overflow-x: auto;
+  -webkit-text-size-adjust: 100%;
+  font-family: 'Kalpurush', 'Hind Siliguri', 'Noto Serif Bengali', serif, sans-serif;
+}
+
+#root {
+  min-width: 1240px;
+  font-family: 'Kalpurush', 'Hind Siliguri', 'Noto Serif Bengali', serif, sans-serif;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+}

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1280, user-scalable=yes" />
+    <title>মোগলগাঁও লিটল স্টার একাডেমি - হিসাব ব্যবস্থাপনা</title>
+    <meta name="description" content="মোগলগাঁও লিটল স্টার একাডেমির দৈনিক ছাত্র-ছাত্রীদের বেতন কালেকশন, দৈনিক খরচ, ব্যাংক ক্রেডিট-ডেবিট লেনদেন ও মাসিক গড় হিসাব নিকাশ সফটওয়্যার।" />
+    <meta property="og:title" content="মোগলগাঁও লিটল স্টার একাডেমি - হিসাব ব্যবস্থাপনা" />
+    <meta property="og:description" content="মোগলগাঁও লিটল স্টার একাডেমির দৈনিক ছাত্র-ছাত্রীদের বেতন কালেকশন, দৈনিক খরচ, ব্যাংক ক্রেডিট-ডেবিট লেনদেন ও মাসিক গড় হিসাব নিকাশ সফটওয়্যার।" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/jpeg" href="/school_logo.jpg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.maateen.me/kalpurush/font.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      // Automatically fit full desktop layout into mobile screen with pinch-to-zoom support (Gmail Desktop style)
+      (function() {
+        function autoFitDesktopOnMobile() {
+          var targetWidth = 1240;
+          var screenWidth = window.innerWidth;
+          if (window.screen && window.screen.width) {
+            var isLandscape = Math.abs(window.orientation || 0) === 90;
+            var sw = isLandscape 
+              ? Math.max(window.screen.width, window.screen.height) 
+              : Math.min(window.screen.width, window.screen.height);
+            if (sw && sw > 0) {
+              screenWidth = Math.min(screenWidth || sw, sw);
+            }
+          }
+          if (!screenWidth || screenWidth <= 0) {
+            screenWidth = targetWidth;
+          }
+
+          var meta = document.querySelector('meta[name="viewport"]');
+          if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = 'viewport';
+            document.head.appendChild(meta);
+          }
+
+          if (screenWidth < targetWidth) {
+            var scale = Number((screenWidth / targetWidth).toFixed(4));
+            meta.setAttribute(
+              'content',
+              'width=' + targetWidth + ', initial-scale=' + scale + ', minimum-scale=' + (scale * 0.75).toFixed(4) + ', maximum-scale=4.0, user-scalable=yes'
+            );
+          } else {
+            meta.setAttribute('content', 'width=' + targetWidth + ', initial-scale=1.0, user-scalable=yes');
+          }
+        }
+
+        autoFitDesktopOnMobile();
+        window.addEventListener('resize', autoFitDesktopOnMobile);
+        window.addEventListener('orientationchange', function() {
+          setTimeout(autoFitDesktopOnMobile, 120);
+        });
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-800 antialiased font-['Kalpurush','Hind_Siliguri',sans-serif] min-w-[1240px] overflow-x-auto">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
