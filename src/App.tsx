@@ -3,9 +3,8 @@ import confetti from 'canvas-confetti';
 import { 
   StudentFee, 
   SchoolExpense, 
-  BankTransaction,
-  BankTransactionType,
-  AppUser
+  BankTransaction, 
+  AppUser 
 } from './types';
 import { 
   getTodayDateString, 
@@ -25,7 +24,22 @@ import {
   exportDataAsJSON,
   resetDemoData,
 } from './utils/storage';
-import { getCurrentUser, logoutUser } from './utils/auth';
+import { getCurrentUser, logoutUser, saveUsers } from './utils/auth';
+import { 
+  subscribeToFees, 
+  subscribeToExpenses, 
+  subscribeToBankTransactions,
+  subscribeToUsers,
+  saveFeeToCloud,
+  deleteFeeFromCloud,
+  saveExpenseToCloud,
+  deleteExpenseFromCloud,
+  saveBankTxToCloud,
+  deleteBankTxFromCloud,
+  saveUserToCloud,
+  seedInitialUsersIfEmpty
+} from './utils/cloudSync';
+import { testFirestoreConnection } from './firebase';
 
 import { Header } from './components/Header';
 import { Dashboard } from './components/Dashboard';
@@ -54,18 +68,67 @@ export default function App() {
     loadBankTransactionsFromStorage()
   );
 
-  // Sync to local storage
+  // 1. Initial Cloud Setup & Local Sync-up
   useEffect(() => {
-    saveFeesToStorage(fees);
-  }, [fees]);
+    testFirestoreConnection();
+    seedInitialUsersIfEmpty();
 
-  useEffect(() => {
-    saveExpensesToStorage(expenses);
-  }, [expenses]);
+    // If local device already has data, sync it to cloud
+    const localFees = loadFeesFromStorage();
+    if (localFees.length > 0) {
+      localFees.forEach((f) => saveFeeToCloud(f));
+    }
+    const localExpenses = loadExpensesFromStorage();
+    if (localExpenses.length > 0) {
+      localExpenses.forEach((e) => saveExpenseToCloud(e));
+    }
+    const localBank = loadBankTransactionsFromStorage();
+    if (localBank.length > 0) {
+      localBank.forEach((b) => saveBankTxToCloud(b));
+    }
+  }, []);
 
+  // 2. Real-time Live Cloud Subscriptions
   useEffect(() => {
-    saveBankTransactionsToStorage(bankTransactions);
-  }, [bankTransactions]);
+    // Listen to live student fees
+    const unsubFees = subscribeToFees((cloudFees) => {
+      setFees(cloudFees);
+      saveFeesToStorage(cloudFees);
+    });
+
+    // Listen to live school expenses
+    const unsubExpenses = subscribeToExpenses((cloudExpenses) => {
+      setExpenses(cloudExpenses);
+      saveExpensesToStorage(cloudExpenses);
+    });
+
+    // Listen to live bank transactions
+    const unsubBank = subscribeToBankTransactions((cloudBank) => {
+      setBankTransactions(cloudBank);
+      saveBankTransactionsToStorage(cloudBank);
+    });
+
+    // Listen to live users updates
+    const unsubUsers = subscribeToUsers((cloudUsers) => {
+      if (cloudUsers.length > 0) {
+        saveUsers(cloudUsers);
+        // If current user is logged in, sync their latest profile/role
+        if (currentUser) {
+          const fresh = cloudUsers.find((u) => u.id === currentUser.id);
+          if (fresh) {
+            setCurrentUser(fresh);
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubFees();
+      unsubExpenses();
+      unsubBank();
+      unsubUsers();
+    };
+  }, [currentUser?.id]);
 
   // Modals
   const [isFeeModalOpen, setIsFeeModalOpen] = useState(false);
@@ -101,9 +164,10 @@ export default function App() {
     return computeMonthlySummary(currentMonthKey, fees, expenses);
   }, [currentMonthKey, fees, expenses]);
 
-  // Handlers
+  // Handlers for Fees (Cloud + Local)
   const handleAddFee = (newFee: StudentFee) => {
     setFees((prev) => [newFee, ...prev]);
+    saveFeeToCloud(newFee);
     try {
       confetti({
         particleCount: 50,
@@ -117,14 +181,18 @@ export default function App() {
 
   const handleDeleteFee = (id: string) => {
     setFees((prev) => prev.filter((f) => f.id !== id));
+    deleteFeeFromCloud(id);
   };
 
   const handleUpdateFee = (updatedFee: StudentFee) => {
     setFees((prev) => prev.map((f) => (f.id === updatedFee.id ? updatedFee : f)));
+    saveFeeToCloud(updatedFee);
   };
 
+  // Handlers for Expenses (Cloud + Local)
   const handleAddExpense = (newExpense: SchoolExpense) => {
     setExpenses((prev) => [newExpense, ...prev]);
+    saveExpenseToCloud(newExpense);
 
     // If paid from bank account, automatically record debit in bank
     if (newExpense.paidFrom === 'ব্যাংক অ্যাকাউন্ট') {
@@ -140,23 +208,29 @@ export default function App() {
         createdAt: new Date().toISOString(),
       };
       setBankTransactions((prev) => [bankTx, ...prev]);
+      saveBankTxToCloud(bankTx);
     }
   };
 
   const handleDeleteExpense = (id: string) => {
     setExpenses((prev) => prev.filter((e) => e.id !== id));
+    deleteExpenseFromCloud(id);
   };
 
   const handleUpdateExpense = (updatedExpense: SchoolExpense) => {
     setExpenses((prev) => prev.map((e) => (e.id === updatedExpense.id ? updatedExpense : e)));
+    saveExpenseToCloud(updatedExpense);
   };
 
+  // Handlers for Bank Transactions (Cloud + Local)
   const handleAddBankTransaction = (newTx: BankTransaction) => {
     setBankTransactions((prev) => [newTx, ...prev]);
+    saveBankTxToCloud(newTx);
   };
 
   const handleDeleteBankTransaction = (id: string) => {
     setBankTransactions((prev) => prev.filter((t) => t.id !== id));
+    deleteBankTxFromCloud(id);
   };
 
   // Open Expense Modal directly (for "আজকের খরচ" buttons)
@@ -181,7 +255,7 @@ export default function App() {
     exportDataAsJSON(fees, expenses, bankTransactions);
   };
 
-  // Import JSON Backup
+  // Import JSON Backup & Sync to Cloud
   const handleImportBackup = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -190,14 +264,17 @@ export default function App() {
         const data = JSON.parse(content);
         if (data.fees && Array.isArray(data.fees)) {
           setFees(data.fees);
+          data.fees.forEach((f: StudentFee) => saveFeeToCloud(f));
         }
         if (data.expenses && Array.isArray(data.expenses)) {
           setExpenses(data.expenses);
+          data.expenses.forEach((ex: SchoolExpense) => saveExpenseToCloud(ex));
         }
         if (data.bankTransactions && Array.isArray(data.bankTransactions)) {
           setBankTransactions(data.bankTransactions);
+          data.bankTransactions.forEach((tx: BankTransaction) => saveBankTxToCloud(tx));
         }
-        alert('ডেটা সফলভাবে রিস্টোর করা হয়েছে!');
+        alert('ডেটা ক্লাউডে সফলভাবে রিস্টোর ও সিঙ্ক করা হয়েছে!');
       } catch (err) {
         alert('ফাইলটি সঠিক ফরম্যাটে নেই। দয়া করে বৈধ ব্যাকআপ ফাইল নির্বাচন করুন।');
       }
@@ -209,6 +286,9 @@ export default function App() {
   const handleResetData = () => {
     if (window.confirm('আপনি কি নিশ্চিত যে সকল হিসাব ও লেনদেন মুছে পরিষ্কার করতে চান?')) {
       resetDemoData();
+      fees.forEach((f) => deleteFeeFromCloud(f.id));
+      expenses.forEach((e) => deleteExpenseFromCloud(e.id));
+      bankTransactions.forEach((b) => deleteBankTxFromCloud(b.id));
       setFees([]);
       setExpenses([]);
       setBankTransactions([]);
@@ -218,6 +298,12 @@ export default function App() {
   const handleLogout = () => {
     logoutUser();
     setCurrentUser(null);
+  };
+
+  // User Profile Update handler
+  const handleUserUpdate = (updated: AppUser) => {
+    setCurrentUser(updated);
+    saveUserToCloud(updated);
   };
 
   // If no user is authenticated, display the Login Screen
@@ -250,118 +336,82 @@ export default function App() {
         onReset={handleResetData}
       />
 
-      {/* Main App Content Body */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-6 min-w-[1240px]">
-        
-        {/* TAB 1: Dashboard & Integrated Daily Cash Flow */}
+      {/* Main Container Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-6 min-w-[1240px]">
         {activeTab === 'dashboard' && (
-          <div className="space-y-8 animate-in fade-in duration-200">
-            <Dashboard
-              fees={fees}
-              expenses={expenses}
-              bankTransactions={bankTransactions}
-              bankBalance={bankBalance}
-              todayIncome={todaySummary.totalIncome}
-              todayExpense={todaySummary.totalExpense}
-              todayBalance={todaySummary.netBalance}
-              monthlyIncome={currentMonthSummary.totalIncome}
-              monthlyExpense={currentMonthSummary.totalExpense}
-              monthlyNet={currentMonthSummary.netBalance}
-              dailyAvgIncome={currentMonthSummary.dailyAverageIncome}
-              dailyAvgExpense={currentMonthSummary.dailyAverageExpense}
-              onOpenFeeModal={() => handleOpenFeeModal(todayStr)}
-              onOpenExpenseModal={() => handleOpenTodayExpense(todayStr)}
-              onOpenBankModal={(type) => {
-                setActiveTab('bank');
-              }}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-              onViewReceipt={(fee) => setSelectedReceiptFee(fee)}
-              isAdmin={isAdmin}
-            />
-
-            {/* Daily Cash Book integrated on dashboard for immediate date-by-date accounting */}
-            <div className="pt-4 border-t border-slate-200">
-              <DailyCashBook
-                fees={fees}
-                expenses={expenses}
-                dailySummaries={dailySummaries}
-                onOpenExpenseModalWithDate={(d) => handleOpenTodayExpense(d)}
-                onOpenFeeModalWithDate={(d) => handleOpenFeeModal(d)}
-              />
-            </div>
-          </div>
+          <Dashboard
+            fees={fees}
+            expenses={expenses}
+            bankTransactions={bankTransactions}
+            bankBalance={bankBalance}
+            todayIncome={todaySummary.totalIncome}
+            todayExpense={todaySummary.totalExpense}
+            todayBalance={todaySummary.netBalance}
+            monthlyIncome={currentMonthSummary.totalIncome}
+            monthlyExpense={currentMonthSummary.totalExpense}
+            monthlyNet={currentMonthSummary.netBalance}
+            dailyAvgIncome={currentMonthSummary.dailyAverageIncome}
+            dailyAvgExpense={currentMonthSummary.dailyAverageExpense}
+            onOpenFeeModal={() => handleOpenFeeModal(todayStr)}
+            onOpenExpenseModal={() => handleOpenTodayExpense(todayStr)}
+            onOpenBankModal={handleOpenBankModalFromHeader}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            onViewReceipt={(fee: StudentFee) => setSelectedReceiptFee(fee)}
+            isAdmin={isAdmin}
+          />
         )}
 
-        {/* TAB 2: Month-wise Student Fees */}
         {activeTab === 'fees' && (
-          <div className="animate-in fade-in duration-200">
-            <FeeSection
-              fees={fees}
-              onOpenFeeModal={() => handleOpenFeeModal(todayStr)}
-              onDeleteFee={handleDeleteFee}
-              onUpdateFee={handleUpdateFee}
-              onViewReceipt={(fee) => setSelectedReceiptFee(fee)}
-              isAdmin={isAdmin}
-            />
-          </div>
+          <FeeSection
+            fees={fees}
+            onOpenFeeModal={() => handleOpenFeeModal()}
+            onDeleteFee={handleDeleteFee}
+            onUpdateFee={handleUpdateFee}
+            onViewReceipt={(fee: StudentFee) => setSelectedReceiptFee(fee)}
+            isAdmin={isAdmin}
+          />
         )}
 
-        {/* TAB 3: Daily Expenses */}
         {activeTab === 'expenses' && (
-          <div className="animate-in fade-in duration-200">
-            <ExpenseSection
-              expenses={expenses}
-              onOpenExpenseModal={() => handleOpenTodayExpense(todayStr)}
-              onDeleteExpense={handleDeleteExpense}
-              onUpdateExpense={handleUpdateExpense}
-              todayExpense={todaySummary.totalExpense}
-              isAdmin={isAdmin}
-            />
-          </div>
+          <ExpenseSection
+            expenses={expenses}
+            onOpenExpenseModal={() => handleOpenTodayExpense()}
+            onDeleteExpense={handleDeleteExpense}
+            onUpdateExpense={handleUpdateExpense}
+            todayExpense={todaySummary.totalExpense}
+            isAdmin={isAdmin}
+          />
         )}
 
-        {/* TAB 4: Bank Section (Balance & Credit/Debit Buttons & History) */}
         {activeTab === 'bank' && (
-          <div className="animate-in fade-in duration-200">
-            <BankSection
-              transactions={bankTransactions}
-              onAddTransaction={handleAddBankTransaction}
-              onDeleteTransaction={handleDeleteBankTransaction}
-              currentBalance={bankBalance}
-              isAdmin={isAdmin}
-            />
-          </div>
+          <BankSection
+            transactions={bankTransactions}
+            currentBalance={bankBalance}
+            onAddTransaction={handleAddBankTransaction}
+            onDeleteTransaction={handleDeleteBankTransaction}
+            isAdmin={isAdmin}
+          />
         )}
 
-        {/* TAB 5: Monthly Analytics & Daily Averages */}
+        {activeTab === 'daily_cashbook' && (
+          <DailyCashBook
+            fees={fees}
+            expenses={expenses}
+            dailySummaries={dailySummaries}
+            onOpenExpenseModalWithDate={(date: string) => handleOpenTodayExpense(date)}
+            onOpenFeeModalWithDate={(date: string) => handleOpenFeeModal(date)}
+          />
+        )}
+
         {activeTab === 'monthly' && (
-          <div className="animate-in fade-in duration-200">
-            <MonthlyAnalytics
-              fees={fees}
-              expenses={expenses}
-            />
-          </div>
+          <MonthlyAnalytics
+            fees={fees}
+            expenses={expenses}
+          />
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500 mt-auto print:hidden">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center space-x-2">
-            <img 
-              src="/school_logo.jpg" 
-              alt="Logo" 
-              className="w-5 h-5 rounded-full object-contain"
-              referrerPolicy="no-referrer" 
-            />
-            <span className="font-semibold text-slate-700">{SCHOOL_INFO.name}</span>
-            <span>• {SCHOOL_INFO.address}</span>
-          </div>
-          <p>© {new Date().getFullYear()} মোগলগাঁও লিটল স্টার একাডেমি • সর্বস্বত্ব সংরক্ষিত</p>
-        </div>
-      </footer>
-
-      {/* Global Modals */}
+      {/* Modal: Fee Collection */}
       <FeeCollectionModal
         isOpen={isFeeModalOpen}
         onClose={() => setIsFeeModalOpen(false)}
@@ -369,6 +419,7 @@ export default function App() {
         initialDate={feeModalDate}
       />
 
+      {/* Modal: School Expense */}
       <ExpenseModal
         isOpen={isExpenseModalOpen}
         onClose={() => setIsExpenseModalOpen(false)}
@@ -376,34 +427,46 @@ export default function App() {
         initialDate={expenseModalDate}
       />
 
-      <ReceiptModal
-        fee={selectedReceiptFee}
-        onClose={() => setSelectedReceiptFee(null)}
+      {/* Modal: Receipt View */}
+      {selectedReceiptFee && (
+        <ReceiptModal
+          fee={selectedReceiptFee}
+          onClose={() => setSelectedReceiptFee(null)}
+        />
+      )}
+
+      {/* Modal: Admin User & Password Management */}
+      <AdminUserManagementModal
+        isOpen={isUserManagementOpen}
+        onClose={() => setIsUserManagementOpen(false)}
+        currentUser={currentUser}
       />
 
-      {/* Admin User Management Modal */}
-      {isUserManagementOpen && (
-        <AdminUserManagementModal
-          isOpen={isUserManagementOpen}
-          onClose={() => setIsUserManagementOpen(false)}
-          currentUser={currentUser}
-        />
-      )}
+      {/* Modal: User Profile & Security */}
+      <UserProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentUser={currentUser}
+        onUserUpdate={handleUserUpdate}
+        onOpenUserManagement={() => {
+          setIsProfileModalOpen(false);
+          setIsUserManagementOpen(true);
+        }}
+        onLogout={handleLogout}
+      />
 
-      {/* User Profile & Security Modal */}
-      {isProfileModalOpen && (
-        <UserProfileModal
-          isOpen={isProfileModalOpen}
-          onClose={() => setIsProfileModalOpen(false)}
-          currentUser={currentUser}
-          onUserUpdate={(updated) => setCurrentUser(updated)}
-          onOpenUserManagement={() => {
-            setIsProfileModalOpen(false);
-            setIsUserManagementOpen(true);
-          }}
-          onLogout={handleLogout}
-        />
-      )}
+      {/* Footer */}
+      <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500 mt-auto min-w-[1240px]">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <p>
+            © {new Date().getFullYear()} {SCHOOL_INFO.name} • সকল স্বত্ব সংরক্ষিত
+          </p>
+          <div className="flex items-center gap-2 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>লাইভ ক্লাউড ডাটাবেজ সক্রিয় (Multi-device Sync)</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -126,16 +126,25 @@ export const ExpenseSection: React.FC<ExpenseSectionProps> = ({
           </p>
         </div>
 
-        <div className="shrink-0">
-          <button
-            id="today-expense-action-btn"
-            onClick={onOpenExpenseModal}
-            className="inline-flex items-center px-6 py-4 bg-white hover:bg-rose-50 text-rose-700 font-extrabold text-base rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95"
-          >
-            <Sparkles className="w-5 h-5 mr-2 text-rose-600 animate-pulse" />
-            আজকের খরচ যোগ করুন
-          </button>
-        </div>
+        {isAdmin ? (
+          <div className="shrink-0">
+            <button
+              id="today-expense-action-btn"
+              onClick={onOpenExpenseModal}
+              className="inline-flex items-center px-6 py-4 bg-white hover:bg-rose-50 text-rose-700 font-extrabold text-base rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95"
+            >
+              <Sparkles className="w-5 h-5 mr-2 text-rose-600 animate-pulse" />
+              আজকের খরচ যোগ করুন
+            </button>
+          </div>
+        ) : (
+          <div className="shrink-0">
+            <span className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/20 text-white text-xs font-bold border border-white/30 backdrop-blur-xs">
+              <Eye className="w-4 h-4 text-amber-200" />
+              <span>কমিটি ভিউ (শুধুমাত্র দেখার অনুমতি)</span>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Month Filter Tabs */}

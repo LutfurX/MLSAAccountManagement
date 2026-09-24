@@ -1,29 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Users, 
   UserPlus, 
-  Key, 
   Trash2, 
   Copy, 
   Check, 
   Shield, 
   Eye, 
-  EyeOff, 
   Sparkles, 
   Lock,
   UserCheck,
-  Phone,
-  Building,
-  RefreshCw
+  CloudCheck
 } from 'lucide-react';
 import { AppUser } from '../types';
 import { 
   loadUsers, 
   saveUsers, 
+  removeUserAccount,
   generateRandomPassword, 
   generateSuggestedUsername 
 } from '../utils/auth';
+import { subscribeToUsers } from '../utils/cloudSync';
 
 interface AdminUserManagementModalProps {
   isOpen: boolean;
@@ -39,6 +37,17 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
   onUserListChange,
 }) => {
   const [users, setUsers] = useState<AppUser[]>(() => loadUsers());
+
+  // Listen to live Cloud Firestore updates
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsub = subscribeToUsers((cloudUsers) => {
+      if (cloudUsers && cloudUsers.length > 0) {
+        setUsers(cloudUsers);
+      }
+    });
+    return () => unsub();
+  }, [isOpen]);
 
   // Form states for new committee user
   const [fullName, setFullName] = useState('');
@@ -74,12 +83,14 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
     }
 
     const cleanUsername = username.trim().toLowerCase();
+    
     // Check if username already exists
     if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
       alert('এই ইউজার নেইমটি ইতিমধ্যে ব্যবহার করা হয়েছে! অনুগ্রহ করে ভিন্ন ইউজার নেইম দিন।');
       return;
     }
 
+    // Strictly enforce role === 'user' (No additional admin can ever be created)
     const newUser: AppUser = {
       id: `user_${Date.now()}`,
       username: cleanUsername,
@@ -93,11 +104,11 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
 
     const updated = [...users, newUser];
     setUsers(updated);
-    saveUsers(updated);
+    saveUsers(updated); // Syncs to Cloud Firestore & localStorage
     if (onUserListChange) onUserListChange();
 
-    setSuccessMessage(`সফলভাবে "${newUser.fullName}"-এর জন্য ইউজার অ্যাকাউন্ট তৈরি হয়েছে!`);
-    setTimeout(() => setSuccessMessage(''), 4000);
+    setSuccessMessage(`সফলভাবে "${newUser.fullName}"-এর অ্যাকাউন্ট ক্লাউড ডাটাবেজে তৈরি হয়েছে! যেকোনো ডিভাইস থেকে এখন এই ইউজার লগইন করতে পারবে।`);
+    setTimeout(() => setSuccessMessage(''), 5000);
 
     // Reset form
     setFullName('');
@@ -108,19 +119,22 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
 
   const handleDeleteUser = (userId: string, name: string) => {
     if (userId === currentUser.id) {
-      alert('আপনি আপনার নিজের অ্যাডমিন অ্যাকাউন্ট মুছতে পারবেন না!');
+      alert('আপনি প্রধান শিক্ষক অ্যাকাউন্ট মুছতে পারবেন না!');
       return;
     }
-    if (window.confirm(`আপনি কি নিশ্চিতভাবে "${name}"-এর ইউজার অ্যাকাউন্টটি মুছে ফেলতে চান?`)) {
-      const updated = users.filter((u) => u.id !== userId);
-      setUsers(updated);
-      saveUsers(updated);
-      if (onUserListChange) onUserListChange();
+    if (window.confirm(`আপনি কি নিশ্চিতভাবে "${name}"-এর ইউজার অ্যাকাউন্টটি ক্লাউড ডাটাবেজ থেকে মুছে ফেলতে চান?`)) {
+      try {
+        const updated = removeUserAccount(userId);
+        setUsers(updated);
+        if (onUserListChange) onUserListChange();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'মুছে ফেলা সম্ভব হয়নি');
+      }
     }
   };
 
   const handleCopyCredentials = (u: AppUser) => {
-    const text = `মোগলগাঁও লিটল স্টার একাডেমি হিসাব লগইন তথ্য:\nনাম: ${u.fullName} (${u.designation})\nইউজার নেইম: ${u.username}\nপাসওয়ার্ড: ${u.password}\nঅনুমতি: শুধুমাত্র দেখার অনুমতি (View Only)`;
+    const text = `মোগলগাঁও লিটল স্টার একাডেমি হিসাব সফটওয়্যার লগইন তথ্য:\nনাম: ${u.fullName} (${u.designation})\nইউজার নেইম: ${u.username}\nপাসওয়ার্ড: ${u.password}\nঅনুমতি: শুধুমাত্র দেখার অনুমতি (View Only)\nলিংক: ${window.location.origin}`;
     navigator.clipboard.writeText(text);
     setCopiedId(u.id);
     setTimeout(() => setCopiedId(null), 2500);
@@ -134,18 +148,18 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
     }
 
     const updated = users.map((u) => {
-      if (u.id === currentUser.id) {
+      if (u.role === 'admin' || u.id === currentUser.id) {
         return { ...u, password: adminNewPassword.trim() };
       }
       return u;
     });
 
     setUsers(updated);
-    saveUsers(updated);
+    saveUsers(updated); // Updates Firestore instantly
     if (onUserListChange) onUserListChange();
-    setAdminSuccessMsg('আপনার অ্যাডমিন পাসওয়ার্ড সফলভাবে পরিবর্তিত হয়েছে!');
+    setAdminSuccessMsg('আপনার অ্যাডমিন পাসওয়ার্ড ক্লাউডে সফলভাবে আপডেট হয়েছে! পুরনো পাসওয়ার্ড আর কোনো ডিভাইসে কাজ করবে না।');
     setAdminNewPassword('');
-    setTimeout(() => setAdminSuccessMsg(''), 4000);
+    setTimeout(() => setAdminSuccessMsg(''), 5000);
   };
 
   return (
@@ -157,7 +171,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
         className="bg-white rounded-2xl max-w-3xl w-full my-auto shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Sticky Header */}
+        {/* Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
           <div className="flex items-center space-x-3">
             <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-700 shrink-0">
@@ -165,10 +179,10 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 leading-snug">
-                কমিটি সদস্য ইউজার ও পাসওয়ার্ড ব্যবস্থাপনা
+                কমিটি সদস্য ইউজার ও পাসওয়ার্ড ব্যবস্থাপনা (ক্লাউড ডাটাবেজ)
               </h3>
               <p className="text-xs text-slate-500">
-                প্রধান শিক্ষক প্রোফাইল • সদস্যদের লগইন ইউজারনেম ও পাসওয়ার্ড তৈরি করুন
+                একমাত্র প্রধান শিক্ষক অ্যাডমিন • তৈরি করা ইউজার যেকোনো ডিভাইস দিয়ে লগইন করতে পারবে
               </p>
             </div>
           </div>
@@ -189,10 +203,10 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
             <Shield className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
             <div className="text-xs text-indigo-950 space-y-1">
               <p className="font-bold text-sm text-indigo-900">
-                কমিটি সদস্যদের জন্য নিরাপদ ভিউয়ার (View-Only) এক্সেস
+                🔒 সিঙ্গেল অ্যাডমিন নীতি ও কমিটি সদস্যদের ভিউয়ার এক্সেস
               </p>
               <p className="text-indigo-800/90 leading-relaxed">
-                আপনি কমিটির প্রতিটি সদস্যের নামে পৃথক ইউজারনেম ও কাস্টম পাসওয়ার্ড তৈরি করে দিতে পারেন। তারা লগইন করে স্কুলের সকল আয়, ব্যয়, ব্যালেন্স, মাসিক রিপোর্ট ও ভাউচার দেখতে ও প্রিন্ট করতে পারবেন, কিন্তু কোনো তথ্য <strong>এডিট বা ডিলিট</strong> করতে পারবেন না।
+                সফটওয়্যারটিতে <strong>একমাত্র আপনিই (প্রধান শিক্ষক) একমাত্র অ্যাডমিন</strong>। কোনো দ্বিতীয় অ্যাডমিন তৈরি করা সম্পূর্ণ বন্ধ রাখা হয়েছে। আপনি কমিটির প্রতিটি সদস্যের জন্য পৃথক ইউজারনেম ও পাসওয়ার্ড তৈরি করে দিলে তারা তাদের নিজস্ব মোবাইল থেকে লগইন করে স্কুলের সকল আয়, ব্যয়, ব্যালেন্স, মাসিক রিপোর্ট দেখতে ও প্রিন্ট করতে পারবেন, কিন্তু কোনো তথ্য <strong>এডিট বা ডিলিট</strong> করতে পারবেন না।
               </p>
             </div>
           </div>
@@ -268,6 +282,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="যেমন: rohim123"
                     required
+                    autoCapitalize="none"
                     className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-hidden"
                   />
                 </div>
@@ -280,7 +295,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                     type="text"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="যেমন: 123456 বা রেন্ডম"
+                    placeholder="যেমন: 123456 বা যেকোনো পাসওয়ার্ড"
                     required
                     className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-hidden"
                   />
@@ -303,14 +318,14 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
               <div className="flex items-center justify-between pt-1">
                 <div className="text-xs text-slate-500 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>রোল: <strong>User (শুধুমাত্র দেখার ও প্রিন্ট করার অনুমতি)</strong></span>
+                  <span>ভূমিকা: <strong>User (ভিউ-অনলি সদস্য, কোনো এডিট ক্ষমতা নেই)</strong></span>
                 </div>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
                 >
                   <UserCheck className="w-4 h-4" />
-                  <span>অ্যাকাউন্ট তৈরি করুন</span>
+                  <span>ক্লাউডে অ্যাকাউন্ট সেভ করুন</span>
                 </button>
               </div>
             </form>
@@ -320,7 +335,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
           <div>
             <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
               <Users className="w-4 h-4 text-indigo-600" />
-              <span>সকল সক্রিয় ইউজার ও লগইন তথ্য তালিকা ({users.length} জন)</span>
+              <span>সক্রিয় ইউজার তালিকা ({users.length} জন)</span>
             </h4>
 
             <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
@@ -356,14 +371,14 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                           </td>
                           <td className="py-3 px-3 whitespace-nowrap">
                             {isAdmin ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
                                 <Shield className="w-3 h-3 mr-1" />
-                                Admin (প্রধান শিক্ষক)
+                                একমাত্র অ্যাডমিন
                               </span>
                             ) : (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <Eye className="w-3 h-3 mr-1" />
-                                User (ভিউ-অনলি)
+                                User (ভিউ-অনলি সদস্য)
                               </span>
                             )}
                           </td>
@@ -372,7 +387,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                               type="button"
                               onClick={() => handleCopyCredentials(u)}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold border border-indigo-200 cursor-pointer transition-colors"
-                              title="কমিটি সদস্যকে পাঠানোর জন্য কপি করুন"
+                              title="সদস্যকে পাঠানোর জন্য কপি করুন"
                             >
                               {copiedId === u.id ? (
                                 <>
@@ -389,7 +404,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                           </td>
                           <td className="py-3 px-3 text-center">
                             {isAdmin ? (
-                              <span className="text-[11px] text-slate-400 italic">প্রধান অ্যাকাউন্ট</span>
+                              <span className="text-[11px] text-purple-700 font-bold">স্থায়ী অ্যাডমিন</span>
                             ) : (
                               <button
                                 type="button"
@@ -414,10 +429,10 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5">
             <h4 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
               <Lock className="w-4 h-4 text-purple-600" />
-              <span>প্রধান শিক্ষকের নিজের পাসওয়ার্ড পরিবর্তন</span>
+              <span>প্রধান শিক্ষকের অ্যাডমিন পাসওয়ার্ড পরিবর্তন (ক্লাউডে সংরক্ষণ)</span>
             </h4>
             <p className="text-xs text-slate-500 mb-3">
-              অন্য কেউ যাতে আপনার অনুমতি ছাড়া অ্যাডমিন প্রবেশ করতে না পারে, সেজন্য আপনার সুবিধামত নতুন পাসওয়ার্ড দিন।
+              আপনার অ্যাডমিন পাসওয়ার্ড পরিবর্তন করলে তা সাথে সাথে ক্লাউডে আপডেট হবে। এরপর থেকে যেকোনো ডিভাইসে লগইন করতে আপনার এই নতুন পাসওয়ার্ডটি ব্যবহার করতে হবে।
             </p>
 
             {adminSuccessMsg && (
@@ -433,7 +448,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                   type="text"
                   value={adminNewPassword}
                   onChange={(e) => setAdminNewPassword(e.target.value)}
-                  placeholder="অ্যাডমিনের নতুন পাসওয়ার্ড লিখুন..."
+                  placeholder="অ্যাডমিনের নতুন পাসওয়ার্ড দিন..."
                   required
                   className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-hidden font-mono"
                 />
@@ -442,7 +457,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                 type="submit"
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer"
               >
-                পাসওয়ার্ড আপডেট করুন
+                পাসওয়ার্ড ক্লাউডে সেভ করুন
               </button>
             </form>
           </div>

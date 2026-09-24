@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "appUser": {
+      "title": "AppUser",
+      "description": "System user account for headmaster (admin) and committee members (viewer)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "designation": { "type": "string" },
+        "phone": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "username", "password", "fullName", "role", "designation", "createdAt"]
+    },
+    "studentFee": {
+      "title": "StudentFee",
+      "description": "Student fee collection record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "rollNo": { "type": "string" },
+        "amount": { "type": "number" },
+        "receiptNo": { "type": "string" },
+        "collectedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "date", "amount", "receiptNo", "collectedBy", "createdAt"]
+    },
+    "schoolExpense": {
+      "title": "SchoolExpense",
+      "description": "School daily expenditure record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "voucherNo": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "date", "category", "title", "amount", "createdAt"]
+    },
+    "bankTransaction": {
+      "title": "BankTransaction",
+      "description": "School bank account deposit and withdrawal record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "type": { "type": "string", "enum": ["credit", "debit"] },
+        "amount": { "type": "number" },
+        "referenceNo": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "date", "type", "amount", "referenceNo", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/app_users/{userId}": {
+      "schema": "appUser",
+      "description": "App users accounts for authentication"
+    },
+    "/student_fees/{feeId}": {
+      "schema": "studentFee",
+      "description": "Student fee records"
+    },
+    "/school_expenses/{expenseId}": {
+      "schema": "schoolExpense",
+      "description": "School expense records"
+    },
+    "/bank_transactions/{txId}": {
+      "schema": "bankTransaction",
+      "description": "Bank transaction records"
+    }
+  }
+}

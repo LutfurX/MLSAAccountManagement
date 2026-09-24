@@ -1,8 +1,14 @@
 import { AppUser } from '../types';
+import { 
+  getCloudUserByUsername, 
+  saveUserToCloud, 
+  deleteUserFromCloud, 
+  seedInitialUsersIfEmpty 
+} from './cloudSync';
 
 const STORAGE_KEYS = {
-  USERS: 'mlsa_app_users_v1',
-  CURRENT_USER: 'mlsa_current_user_v1',
+  USERS: 'mlsa_app_users_v2',
+  CURRENT_USER: 'mlsa_current_user_v2',
 };
 
 export const DEFAULT_USERS: AppUser[] = [
@@ -33,11 +39,13 @@ export function loadUsers(): AppUser[] {
     const raw = localStorage.getItem(STORAGE_KEYS.USERS);
     if (!raw) {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
+      seedInitialUsersIfEmpty();
       return DEFAULT_USERS;
     }
     const users = JSON.parse(raw);
     if (!Array.isArray(users) || users.length === 0) {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
+      seedInitialUsersIfEmpty();
       return DEFAULT_USERS;
     }
     return users;
@@ -49,10 +57,43 @@ export function loadUsers(): AppUser[] {
 
 export function saveUsers(users: AppUser[]): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    // Enforce SINGLE ADMIN rule: only one user can have role === 'admin'
+    let adminFound = false;
+    const sanitizedUsers = users.map((u) => {
+      if (u.role === 'admin') {
+        if (!adminFound) {
+          adminFound = true;
+          return u;
+        } else {
+          // Demote any accidental duplicate admin to user
+          return { ...u, role: 'user' as const };
+        }
+      }
+      return u;
+    });
+
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(sanitizedUsers));
+
+    // Sync each user to Firestore
+    sanitizedUsers.forEach((u) => {
+      saveUserToCloud(u);
+    });
   } catch (err) {
     console.error('Failed to save users:', err);
   }
+}
+
+// Delete user both locally and from Firestore
+export function removeUserAccount(userId: string): AppUser[] {
+  const currentUsers = loadUsers();
+  const target = currentUsers.find((u) => u.id === userId);
+  if (target?.role === 'admin') {
+    throw new Error('প্রধান শিক্ষক / অ্যাডমিন অ্যাকাউন্ট মুছে ফেলা যাবে না!');
+  }
+  const filtered = currentUsers.filter((u) => u.id !== userId);
+  localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
+  deleteUserFromCloud(userId);
+  return filtered;
 }
 
 export function getCurrentUser(): AppUser | null {
@@ -78,21 +119,48 @@ export function setCurrentUser(user: AppUser | null): void {
   }
 }
 
-export function authenticateUser(username: string, password: string): { success: boolean; user?: AppUser; message?: string } {
-  const users = loadUsers();
+// Authenticate against Cloud Firestore first, with fallback to local cache
+export async function authenticateUser(
+  username: string,
+  password: string
+): Promise<{ success: boolean; user?: AppUser; message?: string }> {
   const cleanUsername = username.trim().toLowerCase();
   const cleanPassword = password.trim();
 
+  try {
+    // 1. First attempt to fetch from Cloud Firestore (ensures multi-device accuracy)
+    const cloudUser = await getCloudUserByUsername(cleanUsername);
+    if (cloudUser) {
+      if (cloudUser.password === cleanPassword) {
+        // Update local cache with latest user info
+        const existing = loadUsers();
+        const updated = [
+          ...existing.filter((u) => u.id !== cloudUser.id),
+          cloudUser,
+        ];
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updated));
+        setCurrentUser(cloudUser);
+        return { success: true, user: cloudUser };
+      } else {
+        return { success: false, message: 'পাসওয়ার্ড সঠিক নয়। অনুগ্রহ করে পুনরায় চেষ্টা করুন।' };
+      }
+    }
+  } catch (cloudErr) {
+    console.warn('Cloud authentication check error, falling back to local:', cloudErr);
+  }
+
+  // 2. Fallback to local storage (e.g. if offline or during initial startup)
+  const users = loadUsers();
   const found = users.find(
     (u) => u.username.toLowerCase() === cleanUsername
   );
 
   if (!found) {
-    return { success: false, message: 'এই ইউজার নেইম দিয়ে কোনো অ্যাকাউন্ট পাওয়া যায়নি।' };
+    return { success: false, message: 'এই ইউজার নেইম দিয়ে কোনো অ্যাকাউন্ট পাওয়া যায়নি।' };
   }
 
   if (found.password !== cleanPassword) {
-    return { success: false, message: 'পাসওয়ার্ড সঠিক নয়। অনুগ্রহ করে পুনরায় চেষ্টা করুন।' };
+    return { success: false, message: 'পাসওয়ার্ড সঠিক নয়। অনুগ্রহ করে পুনরায় চেষ্টা করুন।' };
   }
 
   setCurrentUser(found);

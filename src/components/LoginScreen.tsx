@@ -5,15 +5,10 @@ import {
   Eye, 
   EyeOff, 
   LogIn, 
-  ShieldCheck, 
-  Users, 
-  KeyRound,
-  CheckCircle2,
-  AlertCircle,
-  Building2
+  AlertCircle
 } from 'lucide-react';
 import { AppUser } from '../types';
-import { authenticateUser, loadUsers } from '../utils/auth';
+import { authenticateUser } from '../utils/auth';
 import { SCHOOL_INFO } from '../utils/formatters';
 
 interface LoginScreenProps {
@@ -27,9 +22,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const availableUsers = loadUsers();
-
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -39,21 +32,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = authenticateUser(username, password);
+    try {
+      const res = await authenticateUser(username, password);
       setIsLoading(false);
       if (res.success && res.user) {
         onLoginSuccess(res.user);
       } else {
         setErrorMessage(res.message || 'ইউজার নেইম অথবা পাসওয়ার্ড সঠিক নয়।');
       }
-    }, 250);
-  };
-
-  const fillCredentials = (u: string, p: string) => {
-    setUsername(u);
-    setPassword(p);
-    setErrorMessage('');
+    } catch (err) {
+      setIsLoading(false);
+      console.error('Login error:', err);
+      setErrorMessage('লগইন করার সময় সংযোগ সমস্যা হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন।');
+    }
   };
 
   return (
@@ -64,7 +55,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
       <div className="max-w-md w-full my-auto z-10">
         
-        {/* Brand Card */}
+        {/* Brand Header */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white shadow-xl p-2 mb-3 border-2 border-indigo-400/40">
             <img 
@@ -83,24 +74,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           <p className="text-indigo-200 text-sm mt-1">
             হিসাবরক্ষণ ও আর্থিক ব্যবস্থাপনা পোর্টাল
           </p>
-          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-medium mt-2 border border-indigo-500/30">
-            <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-            <span>লগইন এক্সেস (User & Admin)</span>
-          </div>
         </div>
 
         {/* Main Login Card */}
         <div className="bg-white text-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8 border border-slate-100">
-          <div className="mb-5">
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <LogIn className="w-5 h-5 text-indigo-600" />
-              <span>সফটওয়্যারে প্রবেশ করুন</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              আপনার প্রদত্ত ইউজার নেইম ও পাসওয়ার্ড দিয়ে লগইন করুন।
-            </p>
-          </div>
-
           {errorMessage && (
             <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2 text-rose-700 text-xs animate-in fade-in">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -121,9 +98,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="যেমন: admin অথবা আপনার ইউজারনেম"
+                  placeholder="আপনার ইউজারনেম লিখুন"
                   required
                   autoFocus
+                  autoCapitalize="none"
                   className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 outline-hidden transition-all"
                 />
               </div>
@@ -159,64 +137,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white text-sm font-bold rounded-xl shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
+              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white text-sm font-bold rounded-xl shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 mt-2"
             >
               <LogIn className="w-4 h-4" />
               <span>{isLoading ? 'যাচাই করা হচ্ছে...' : 'লগইন করুন'}</span>
             </button>
           </form>
-
-          {/* Quick Demo Login Credentials Selector */}
-          <div className="mt-6 pt-5 border-t border-slate-100">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2.5 text-center">
-              এক ক্লিকে ডেমো লগইন করুন
-            </span>
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => fillCredentials('admin', 'admin123')}
-                className="p-2.5 text-left rounded-xl border border-indigo-100 bg-indigo-50/70 hover:bg-indigo-100/80 transition-colors cursor-pointer group"
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs text-indigo-900">
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>প্রধান শিক্ষক (Admin)</span>
-                </div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  ইউজার: <span className="font-mono font-semibold text-indigo-800">admin</span>
-                </div>
-                <div className="text-[10px] text-emerald-700 font-medium mt-1">
-                  ✓ সম্পূর্ণ নিয়ন্ত্রণ ও এডিট
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillCredentials('committee', 'user123')}
-                className="p-2.5 text-left rounded-xl border border-emerald-100 bg-emerald-50/70 hover:bg-emerald-100/80 transition-colors cursor-pointer group"
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-900">
-                  <Users className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>কমিটি সদস্য (User)</span>
-                </div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  ইউজার: <span className="font-mono font-semibold text-emerald-800">committee</span>
-                </div>
-                <div className="text-[10px] text-blue-700 font-medium mt-1">
-                  ✓ শুধুমাত্র দেখার অনুমতি
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Informational Guidance */}
-        <div className="mt-5 text-center text-xs text-slate-400 space-y-1">
-          <p>
-            প্রধান শিক্ষক তার প্রোফাইল থেকে কমিটির সকল সদস্যের জন্য ইউজারনেম ও পাসওয়ার্ড তৈরি করতে পারেন।
-          </p>
-          <p className="text-[11px] text-slate-500">
-            কমিটি মেম্বাররা সকল আর্থিক হিসাব দেখতে ও প্রিন্ট করতে পারবেন, কিন্তু এডিট বা ডিলিট করতে পারবেন না।
-          </p>
         </div>
       </div>
     </div>

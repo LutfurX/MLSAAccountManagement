@@ -105,14 +105,23 @@ export const FeeSection: React.FC<FeeSectionProps> = ({
           </p>
         </div>
 
-        <button
-          id="add-student-fee-btn"
-          onClick={onOpenFeeModal}
-          className="inline-flex items-center px-6 py-3.5 bg-white hover:bg-emerald-50 text-emerald-800 font-extrabold text-base rounded-xl shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0"
-        >
-          <PlusCircle className="w-5 h-5 mr-2 text-emerald-600" />
-          নতুন বেতন কালেকশন
-        </button>
+        {isAdmin ? (
+          <button
+            id="add-student-fee-btn"
+            onClick={onOpenFeeModal}
+            className="inline-flex items-center px-6 py-3.5 bg-white hover:bg-emerald-50 text-emerald-800 font-extrabold text-base rounded-xl shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0"
+          >
+            <PlusCircle className="w-5 h-5 mr-2 text-emerald-600" />
+            নতুন বেতন কালেকশন
+          </button>
+        ) : (
+          <div className="shrink-0">
+            <span className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/20 text-white text-xs font-bold border border-white/30 backdrop-blur-xs">
+              <Eye className="w-4 h-4 text-amber-200" />
+              <span>কমিটি ভিউ (শুধুমাত্র দেখার অনুমতি)</span>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Month Selector Bar ("এগুলো মাস আকারে হবে একটা জায়গায়") */}
