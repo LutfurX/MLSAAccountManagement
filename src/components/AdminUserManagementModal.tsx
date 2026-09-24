@@ -9,19 +9,19 @@ import {
   Shield, 
   Eye, 
   Sparkles, 
-  Lock,
+  Lock, 
   UserCheck,
-  CloudCheck
+  Loader2
 } from 'lucide-react';
 import { AppUser } from '../types';
 import { 
   loadUsers, 
-  saveUsers, 
+  saveUsersLocally, 
   removeUserAccount,
   generateRandomPassword, 
   generateSuggestedUsername 
 } from '../utils/auth';
-import { subscribeToUsers } from '../utils/cloudSync';
+import { subscribeToUsers, saveUserToCloud } from '../utils/cloudSync';
 
 interface AdminUserManagementModalProps {
   isOpen: boolean;
@@ -37,6 +37,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
   onUserListChange,
 }) => {
   const [users, setUsers] = useState<AppUser[]>(() => loadUsers());
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Listen to live Cloud Firestore updates
   useEffect(() => {
@@ -44,6 +45,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
     const unsub = subscribeToUsers((cloudUsers) => {
       if (cloudUsers && cloudUsers.length > 0) {
         setUsers(cloudUsers);
+        saveUsersLocally(cloudUsers);
       }
     });
     return () => unsub();
@@ -61,6 +63,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
   // Admin password change states
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminSuccessMsg, setAdminSuccessMsg] = useState('');
+  const [isAdminPassSubmitting, setIsAdminPassSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -71,7 +74,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
     setPassword(pass);
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
       alert('সদস্যের পূর্ণ নাম লিখুন');
@@ -90,34 +93,47 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
       return;
     }
 
-    // Strictly enforce role === 'user' (No additional admin can ever be created)
-    const newUser: AppUser = {
-      id: `user_${Date.now()}`,
-      username: cleanUsername,
-      password: password.trim(),
-      fullName: fullName.trim(),
-      role: 'user', // strictly view-only for committee
-      designation: designation.trim() || 'ম্যানেজিং কমিটি সদস্য',
-      phone: phone.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    };
+    setIsSubmitting(true);
+    try {
+      // Strictly enforce role === 'user' (No additional admin can ever be created)
+      // phone must be string, never undefined to avoid Firestore rejection
+      const newUser: AppUser = {
+        id: `user_${Date.now()}`,
+        username: cleanUsername,
+        password: password.trim(),
+        fullName: fullName.trim(),
+        role: 'user', // strictly view-only for committee
+        designation: designation.trim() || 'ম্যানেজিং কমিটি সদস্য',
+        phone: phone.trim() || '',
+        createdAt: new Date().toISOString(),
+      };
 
-    const updated = [...users, newUser];
-    setUsers(updated);
-    saveUsers(updated); // Syncs to Cloud Firestore & localStorage
-    if (onUserListChange) onUserListChange();
+      // 1. Save directly to Cloud Firestore
+      await saveUserToCloud(newUser);
 
-    setSuccessMessage(`সফলভাবে "${newUser.fullName}"-এর অ্যাকাউন্ট ক্লাউড ডাটাবেজে তৈরি হয়েছে! যেকোনো ডিভাইস থেকে এখন এই ইউজার লগইন করতে পারবে।`);
-    setTimeout(() => setSuccessMessage(''), 5000);
+      // 2. Update local state and storage
+      const updated = [...users.filter((u) => u.id !== newUser.id), newUser];
+      setUsers(updated);
+      saveUsersLocally(updated);
+      if (onUserListChange) onUserListChange();
 
-    // Reset form
-    setFullName('');
-    setUsername('');
-    setPassword('');
-    setPhone('');
+      setSuccessMessage(`সফলভাবে "${newUser.fullName}"-এর অ্যাকাউন্ট তৈরি ও ক্লাউড ডাটাবেজে স্থায়ীভাবে সংরক্ষিত হয়েছে!`);
+      setTimeout(() => setSuccessMessage(''), 5000);
+
+      // Reset form
+      setFullName('');
+      setUsername('');
+      setPassword('');
+      setPhone('');
+    } catch (err) {
+      console.error('Failed to create user:', err);
+      alert('অ্যাকাউন্ট ক্লাউডে সেভ করতে সমস্যা হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করুন।');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDeleteUser = (userId: string, name: string) => {
+  const handleDeleteUser = async (userId: string, name: string) => {
     if (userId === currentUser.id) {
       alert('আপনি প্রধান শিক্ষক অ্যাকাউন্ট মুছতে পারবেন না!');
       return;
@@ -140,26 +156,38 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
     setTimeout(() => setCopiedId(null), 2500);
   };
 
-  const handleUpdateAdminPassword = (e: React.FormEvent) => {
+  const handleUpdateAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminNewPassword.trim() || adminNewPassword.length < 4) {
       alert('নতুন পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে।');
       return;
     }
 
-    const updated = users.map((u) => {
-      if (u.role === 'admin' || u.id === currentUser.id) {
-        return { ...u, password: adminNewPassword.trim() };
-      }
-      return u;
-    });
+    setIsAdminPassSubmitting(true);
+    try {
+      const updated = users.map((u) => {
+        if (u.role === 'admin' || u.id === currentUser.id) {
+          return { ...u, password: adminNewPassword.trim() };
+        }
+        return u;
+      });
 
-    setUsers(updated);
-    saveUsers(updated); // Updates Firestore instantly
-    if (onUserListChange) onUserListChange();
-    setAdminSuccessMsg('আপনার অ্যাডমিন পাসওয়ার্ড ক্লাউডে সফলভাবে আপডেট হয়েছে! পুরনো পাসওয়ার্ড আর কোনো ডিভাইসে কাজ করবে না।');
-    setAdminNewPassword('');
-    setTimeout(() => setAdminSuccessMsg(''), 5000);
+      const updatedAdmin = updated.find((u) => u.id === currentUser.id);
+      if (updatedAdmin) {
+        await saveUserToCloud(updatedAdmin);
+      }
+      setUsers(updated);
+      saveUsersLocally(updated);
+      if (onUserListChange) onUserListChange();
+      setAdminSuccessMsg('আপনার অ্যাডমিন পাসওয়ার্ড ক্লাউডে সফলভাবে আপডেট হয়েছে! পুরনো পাসওয়ার্ড আর কোনো ডিভাইসে কাজ করবে না।');
+      setAdminNewPassword('');
+      setTimeout(() => setAdminSuccessMsg(''), 5000);
+    } catch (err) {
+      console.error('Failed to update admin password:', err);
+      alert('পাসওয়ার্ড ক্লাউডে সেভ করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।');
+    } finally {
+      setIsAdminPassSubmitting(false);
+    }
   };
 
   return (
@@ -179,7 +207,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 leading-snug">
-                কমিটি সদস্য ইউজার ও পাসওয়ার্ড ব্যবস্থাপনা (ক্লাউড ডাটাবেজ)
+                কমিটি সদস্য ইউজার ও পাসওয়ার্ড ব্যবস্থাপনা
               </h3>
               <p className="text-xs text-slate-500">
                 একমাত্র প্রধান শিক্ষক অ্যাডমিন • তৈরি করা ইউজার যেকোনো ডিভাইস দিয়ে লগইন করতে পারবে
@@ -322,10 +350,20 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                 </div>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
                 >
-                  <UserCheck className="w-4 h-4" />
-                  <span>ক্লাউডে অ্যাকাউন্ট সেভ করুন</span>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>সংরক্ষণ করা হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserCheck className="w-4 h-4" />
+                      <span>ক্লাউডে অ্যাকাউন্ট সেভ করুন</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -376,7 +414,7 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
                                 একমাত্র অ্যাডমিন
                               </span>
                             ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <Eye className="w-3 h-3 mr-1" />
                                 User (ভিউ-অনলি সদস্য)
                               </span>
@@ -455,9 +493,11 @@ export const AdminUserManagementModal: React.FC<AdminUserManagementModalProps> =
               </div>
               <button
                 type="submit"
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer"
+                disabled={isAdminPassSubmitting}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
               >
-                পাসওয়ার্ড ক্লাউডে সেভ করুন
+                {isAdminPassSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>পাসওয়ার্ড ক্লাউডে সেভ করুন</span>
               </button>
             </form>
           </div>

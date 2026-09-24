@@ -55,9 +55,9 @@ export function loadUsers(): AppUser[] {
   }
 }
 
-export function saveUsers(users: AppUser[]): void {
+// Save only to localStorage (used by subscription listeners to prevent circular write loops)
+export function saveUsersLocally(users: AppUser[]): void {
   try {
-    // Enforce SINGLE ADMIN rule: only one user can have role === 'admin'
     let adminFound = false;
     const sanitizedUsers = users.map((u) => {
       if (u.role === 'admin') {
@@ -65,21 +65,28 @@ export function saveUsers(users: AppUser[]): void {
           adminFound = true;
           return u;
         } else {
-          // Demote any accidental duplicate admin to user
           return { ...u, role: 'user' as const };
         }
       }
       return u;
     });
-
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(sanitizedUsers));
+  } catch (err) {
+    console.error('Failed to save users locally:', err);
+  }
+}
 
-    // Sync each user to Firestore
-    sanitizedUsers.forEach((u) => {
-      saveUserToCloud(u);
+// Save both locally and sync to Cloud Firestore
+export function saveUsers(users: AppUser[]): void {
+  saveUsersLocally(users);
+  try {
+    users.forEach((u) => {
+      saveUserToCloud(u).catch((err) => {
+        console.error('Failed to sync user to cloud in saveUsers:', err);
+      });
     });
   } catch (err) {
-    console.error('Failed to save users:', err);
+    console.error('Failed to save users to cloud:', err);
   }
 }
 
@@ -91,7 +98,7 @@ export function removeUserAccount(userId: string): AppUser[] {
     throw new Error('প্রধান শিক্ষক / অ্যাডমিন অ্যাকাউন্ট মুছে ফেলা যাবে না!');
   }
   const filtered = currentUsers.filter((u) => u.id !== userId);
-  localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
+  saveUsersLocally(filtered);
   deleteUserFromCloud(userId);
   return filtered;
 }
@@ -138,7 +145,7 @@ export async function authenticateUser(
           ...existing.filter((u) => u.id !== cloudUser.id),
           cloudUser,
         ];
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updated));
+        saveUsersLocally(updated);
         setCurrentUser(cloudUser);
         return { success: true, user: cloudUser };
       } else {

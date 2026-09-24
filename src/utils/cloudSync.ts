@@ -5,7 +5,6 @@ import {
   deleteDoc,
   onSnapshot,
   getDocs,
-  getDoc,
   query,
   where,
   writeBatch,
@@ -23,6 +22,15 @@ const COLLECTIONS = {
   SETTINGS: 'system_settings',
 };
 
+// Deeply sanitize object so no undefined values are sent to Firestore
+export function sanitizeForFirestore<T>(data: T): T {
+  try {
+    return JSON.parse(JSON.stringify(data));
+  } catch (err) {
+    return data;
+  }
+}
+
 // Seed initial users into Firestore if collection is empty
 export async function seedInitialUsersIfEmpty(): Promise<void> {
   try {
@@ -31,7 +39,7 @@ export async function seedInitialUsersIfEmpty(): Promise<void> {
       console.log('Seeding initial users to Firestore...');
       const batch = writeBatch(db);
       for (const u of DEFAULT_USERS) {
-        batch.set(doc(db, COLLECTIONS.USERS, u.id), u);
+        batch.set(doc(db, COLLECTIONS.USERS, u.id), sanitizeForFirestore(u));
       }
       await batch.commit();
     }
@@ -66,11 +74,8 @@ export async function getCloudUserByUsername(username: string): Promise<AppUser 
 
 // Save or update user in Firestore
 export async function saveUserToCloud(user: AppUser): Promise<void> {
-  try {
-    await setDoc(doc(db, COLLECTIONS.USERS, user.id), user, { merge: true });
-  } catch (err) {
-    console.error('Error saving user to Firestore:', err);
-  }
+  const clean = sanitizeForFirestore(user);
+  await setDoc(doc(db, COLLECTIONS.USERS, user.id), clean, { merge: true });
 }
 
 // Delete user from Firestore (Admin cannot be deleted)
@@ -130,7 +135,8 @@ export function subscribeToFees(
 // Save Fee to Cloud
 export async function saveFeeToCloud(fee: StudentFee): Promise<void> {
   try {
-    await setDoc(doc(db, COLLECTIONS.FEES, fee.id), fee, { merge: true });
+    const clean = sanitizeForFirestore(fee);
+    await setDoc(doc(db, COLLECTIONS.FEES, fee.id), clean, { merge: true });
   } catch (err) {
     console.error('Error saving fee to Firestore:', err);
   }
@@ -166,7 +172,8 @@ export function subscribeToExpenses(
 // Save Expense to Cloud
 export async function saveExpenseToCloud(expense: SchoolExpense): Promise<void> {
   try {
-    await setDoc(doc(db, COLLECTIONS.EXPENSES, expense.id), expense, { merge: true });
+    const clean = sanitizeForFirestore(expense);
+    await setDoc(doc(db, COLLECTIONS.EXPENSES, expense.id), clean, { merge: true });
   } catch (err) {
     console.error('Error saving expense to Firestore:', err);
   }
@@ -202,7 +209,8 @@ export function subscribeToBankTransactions(
 // Save Bank Transaction to Cloud
 export async function saveBankTxToCloud(tx: BankTransaction): Promise<void> {
   try {
-    await setDoc(doc(db, COLLECTIONS.BANK, tx.id), tx, { merge: true });
+    const clean = sanitizeForFirestore(tx);
+    await setDoc(doc(db, COLLECTIONS.BANK, tx.id), clean, { merge: true });
   } catch (err) {
     console.error('Error saving bank transaction to Firestore:', err);
   }

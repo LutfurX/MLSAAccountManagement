@@ -24,7 +24,7 @@ import {
   exportDataAsJSON,
   resetDemoData,
 } from './utils/storage';
-import { getCurrentUser, logoutUser, saveUsers } from './utils/auth';
+import { getCurrentUser, logoutUser, saveUsersLocally } from './utils/auth';
 import { 
   subscribeToFees, 
   subscribeToExpenses, 
@@ -111,7 +111,7 @@ export default function App() {
     // Listen to live users updates
     const unsubUsers = subscribeToUsers((cloudUsers) => {
       if (cloudUsers.length > 0) {
-        saveUsers(cloudUsers);
+        saveUsersLocally(cloudUsers);
         // If current user is logged in, sync their latest profile/role
         if (currentUser) {
           const fresh = cloudUsers.find((u) => u.id === currentUser.id);
