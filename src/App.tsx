@@ -50,6 +50,7 @@ import { ExpenseModal } from './components/ExpenseModal';
 import { BankSection } from './components/BankSection';
 import { DailyCashBook } from './components/DailyCashBook';
 import { MonthlyAnalytics } from './components/MonthlyAnalytics';
+import { AnnualAudit } from './components/AnnualAudit';
 import { ReceiptModal } from './components/ReceiptModal';
 import { LoginScreen } from './components/LoginScreen';
 import { AdminUserManagementModal } from './components/AdminUserManagementModal';
@@ -223,13 +224,25 @@ export default function App() {
   };
 
   // Handlers for Bank Transactions (Cloud + Local)
-  const handleAddBankTransaction = (newTx: BankTransaction) => {
-    setBankTransactions((prev) => [newTx, ...prev]);
-    saveBankTxToCloud(newTx);
+  const handleAddBankTransaction = async (newTx: BankTransaction) => {
+    setBankTransactions((prev) => {
+      const updated = [newTx, ...prev.filter((t) => t.id !== newTx.id)];
+      saveBankTransactionsToStorage(updated);
+      return updated;
+    });
+    try {
+      await saveBankTxToCloud(newTx);
+    } catch (err) {
+      console.error('Failed to sync bank transaction to cloud:', err);
+    }
   };
 
   const handleDeleteBankTransaction = (id: string) => {
-    setBankTransactions((prev) => prev.filter((t) => t.id !== id));
+    setBankTransactions((prev) => {
+      const updated = prev.filter((t) => t.id !== id);
+      saveBankTransactionsToStorage(updated);
+      return updated;
+    });
     deleteBankTxFromCloud(id);
   };
 
@@ -407,6 +420,15 @@ export default function App() {
           <MonthlyAnalytics
             fees={fees}
             expenses={expenses}
+          />
+        )}
+
+        {activeTab === 'audit' && (
+          <AnnualAudit
+            fees={fees}
+            expenses={expenses}
+            bankTransactions={bankTransactions}
+            bankBalance={bankBalance}
           />
         )}
       </main>

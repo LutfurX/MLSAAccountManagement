@@ -8,14 +8,19 @@ import {
   Search, 
   Filter, 
   FileText, 
-  Trash2,
-  Calendar,
-  Building,
-  CheckCircle2,
-  Upload,
-  X,
-  Image as ImageIcon,
-  Eye
+  Trash2, 
+  Calendar, 
+  Building, 
+  CheckCircle2, 
+  Upload, 
+  X, 
+  Image as ImageIcon, 
+  Eye,
+  Loader2,
+  Wallet,
+  Sparkles,
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 import { BankTransaction, BankTransactionType } from '../types';
 import { 
@@ -23,14 +28,15 @@ import {
   formatBanglaDate, 
   getTodayDateString, 
   generateId, 
-  toBanglaDigits,
+  toBanglaDigits, 
   SCHOOL_INFO 
 } from '../utils/formatters';
+import { compressImage } from '../utils/imageCompressor';
 import { VoucherPreviewModal } from './VoucherPreviewModal';
 
 interface BankSectionProps {
   transactions: BankTransaction[];
-  onAddTransaction: (tx: BankTransaction) => void;
+  onAddTransaction: (tx: BankTransaction) => Promise<void> | void;
   onDeleteTransaction: (id: string) => void;
   currentBalance: number;
   isAdmin?: boolean;
@@ -47,6 +53,25 @@ export const BankSection: React.FC<BankSectionProps> = ({
   const [modalType, setModalType] = useState<BankTransactionType>('credit');
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit' | 'debit'>('all');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCompressingSlip, setIsCompressingSlip] = useState(false);
+
+  // One-time opening running balance modal states
+  const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
+  const [openingBalanceAmount, setOpeningBalanceAmount] = useState('');
+  const [openingBalanceDate, setOpeningBalanceDate] = useState(getTodayDateString());
+  const [openingBalanceNotes, setOpeningBalanceNotes] = useState('');
+  const [isSavingOpeningBalance, setIsSavingOpeningBalance] = useState(false);
+
+  // Check if an initial/opening balance has already been added
+  const hasOpeningBalance = useMemo(() => {
+    return transactions.some(
+      (tx) =>
+        tx.id.startsWith('tx_bank_init_') ||
+        tx.source === 'পূর্বের প্রারম্ভিক ব্যাংক স্থিতি (Opening Balance)' ||
+        tx.referenceNo === 'OPENING-BALANCE'
+    );
+  }, [transactions]);
 
   // Form states
   const [date, setDate] = useState(getTodayDateString());
@@ -68,18 +93,28 @@ export const BankSection: React.FC<BankSectionProps> = ({
     }
   };
 
-  const processFile = (file: File) => {
-    if (file.size > 5 * 1024 * 1024) {
-      alert('ছবির সাইজ সর্বোচ্চ ৫ MB হতে পারবে');
+  const processFile = async (file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      alert('ছবির সাইজ সর্বোচ্চ ১০ MB হতে পারবে');
       return;
     }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        setSlipImage(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setIsCompressingSlip(true);
+    try {
+      // Compress image to ensure it fits easily within Firestore's 1MB limit (< 80KB)
+      const compressed = await compressImage(file, 1000, 1000, 0.7);
+      setSlipImage(compressed);
+    } catch (err) {
+      console.warn('Fallback reading image:', err);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          setSlipImage(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsCompressingSlip(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -126,7 +161,7 @@ export const BankSection: React.FC<BankSectionProps> = ({
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -154,14 +189,65 @@ export const BankSection: React.FC<BankSectionProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    onAddTransaction(newTx);
-    setSlipImage('');
-    setIsModalOpen(false);
+    setIsSaving(true);
+    try {
+      await onAddTransaction(newTx);
+      setSlipImage('');
+      setIsModalOpen(false);
+    } catch (err) {
+      console.error('Error in onAddTransaction:', err);
+      alert('ব্যাংক লেনদেন সংরক্ষণে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddOpeningBalance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (hasOpeningBalance) {
+      alert('প্রারম্ভিক ব্যাংক স্থিতি (Opening Balance) ইতিমধ্যে যুক্ত করা হয়েছে! এটি সফটওয়্যারে শুধুমাত্র ১ বার যুক্ত করা যাবে।');
+      return;
+    }
+
+    const numAmount = parseFloat(openingBalanceAmount);
+    if (isNaN(numAmount) || numAmount < 0) {
+      alert('সঠিক প্রারম্ভিক টাকার পরিমাণ লিখুন (০ বা তার বেশি)');
+      return;
+    }
+
+    setIsSavingOpeningBalance(true);
+    try {
+      const initTx: BankTransaction = {
+        id: `tx_bank_init_${Date.now()}`,
+        date: openingBalanceDate || getTodayDateString(),
+        type: 'credit',
+        amount: numAmount,
+        source: 'পূর্বের প্রারম্ভিক ব্যাংক স্থিতি (Opening Balance)',
+        referenceNo: 'OPENING-BALANCE',
+        description: openingBalanceNotes.trim() || 'সফটওয়্যার চালুর পূর্বে ব্যাংকে রক্ষিত পূর্ববর্তী জমার স্থিতি (One-time Initial Balance)',
+        recordedBy: recordedBy.trim() || 'প্রধান শিক্ষক (অ্যাডমিন)',
+        createdAt: '2026-01-01T00:00:00.000Z', // early timestamp so it sorts first
+      };
+
+      await onAddTransaction(initTx);
+      setIsOpeningBalanceModalOpen(false);
+      setOpeningBalanceAmount('');
+      setOpeningBalanceNotes('');
+    } catch (err) {
+      console.error('Error saving opening balance:', err);
+      alert('প্রারম্ভিক ব্যালেন্স সংরক্ষণে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+    } finally {
+      setIsSavingOpeningBalance(false);
+    }
   };
 
   // Sort transactions chronological for calculating running balance
   const sortedTransactions = useMemo(() => {
-    return [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return [...transactions].sort((a, b) => {
+      const timeDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return new Date(a.createdAt || a.date).getTime() - new Date(b.createdAt || b.date).getTime();
+    });
   }, [transactions]);
 
   // Compute running balance for each transaction
@@ -178,19 +264,21 @@ export const BankSection: React.FC<BankSectionProps> = ({
         runningBalance: balance,
       };
     });
-    // Return newest first for display table
-    return list.reverse();
+    // Return newest first for display table safely
+    return [...list].reverse();
   }, [sortedTransactions]);
 
-  // Filtered transactions
+  // Filtered transactions with safe null checks
   const filteredTransactions = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
     return transactionsWithBalance.filter((tx) => {
       const matchesType = typeFilter === 'all' || tx.type === typeFilter;
       const matchesSearch = 
-        tx.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.referenceNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.date.includes(searchQuery);
+        !q ||
+        (tx.source || '').toLowerCase().includes(q) ||
+        (tx.referenceNo || '').toLowerCase().includes(q) ||
+        (tx.description || '').toLowerCase().includes(q) ||
+        (tx.date || '').includes(q);
       return matchesType && matchesSearch;
     });
   }, [transactionsWithBalance, typeFilter, searchQuery]);
@@ -236,13 +324,33 @@ export const BankSection: React.FC<BankSectionProps> = ({
             </div>
           </div>
 
-          {/* User's explicitly requested Credit and Debit Buttons (Admin Only) */}
+          {/* User's explicitly requested Credit, Debit and One-Time Running Balance Buttons (Admin Only) */}
           {isAdmin ? (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              {!hasOpeningBalance ? (
+                <button
+                  id="bank-opening-balance-btn"
+                  onClick={() => setIsOpeningBalanceModalOpen(true)}
+                  className="inline-flex items-center justify-center px-4 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-extrabold rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0 border border-amber-300 animate-pulse hover:animate-none"
+                  title="পূর্বের ব্যাংকে থাকা টাকা ১ বার যুক্ত করুন"
+                >
+                  <Sparkles className="w-5 h-5 mr-2 text-slate-950" />
+                  <span>পূর্বের ব্যাংক স্থিতি যুক্ত করুন (১ বার)</span>
+                </button>
+              ) : (
+                <div 
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-400/40 backdrop-blur-xs shrink-0 cursor-default"
+                  title="পূর্বের প্রারম্ভিক ব্যাংক ব্যালেন্স ইতিমধ্যে সফটওয়্যারে সফলভাবে সংরক্ষিত রয়েছে"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>প্রারম্ভিক স্থিতি যুক্ত সম্পন্ন ✓</span>
+                </div>
+              )}
+
               <button
                 id="bank-credit-btn"
                 onClick={() => openModal('credit')}
-                className="inline-flex items-center justify-center px-6 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0"
+                className="inline-flex items-center justify-center px-5 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0"
               >
                 <PlusCircle className="w-5 h-5 mr-2" />
                 <span>ক্রেডিট বাটন (এড / জমা)</span>
@@ -251,7 +359,7 @@ export const BankSection: React.FC<BankSectionProps> = ({
               <button
                 id="bank-debit-btn"
                 onClick={() => openModal('debit')}
-                className="inline-flex items-center justify-center px-6 py-3.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0"
+                className="inline-flex items-center justify-center px-5 py-3.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95 shrink-0"
               >
                 <MinusCircle className="w-5 h-5 mr-2" />
                 <span>ডেবিট বাটন (উত্তোলন / খরচ)</span>
@@ -364,7 +472,15 @@ export const BankSection: React.FC<BankSectionProps> = ({
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-slate-800">
-                        <div className="font-semibold">{tx.source}</div>
+                        <div className="font-semibold flex items-center gap-1.5 flex-wrap">
+                          <span>{tx.source}</span>
+                          {(tx.id.startsWith('tx_bank_init_') || tx.referenceNo === 'OPENING-BALANCE') && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              <Sparkles className="w-3 h-3 text-amber-600" />
+                              প্রারম্ভিক স্থিতি
+                            </span>
+                          )}
+                        </div>
                         {tx.description && (
                           <div className="text-xs text-slate-500 mt-0.5">{tx.description}</div>
                         )}
@@ -628,13 +744,21 @@ export const BankSection: React.FC<BankSectionProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className={`px-5 py-2 text-sm font-bold text-white rounded-lg shadow-sm transition-all cursor-pointer ${
+                  disabled={isSaving || isCompressingSlip}
+                  className={`px-5 py-2 text-sm font-bold text-white rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-2 disabled:opacity-60 ${
                     modalType === 'credit'
                       ? 'bg-emerald-600 hover:bg-emerald-700'
                       : 'bg-rose-600 hover:bg-rose-700'
                   }`}
                 >
-                  {modalType === 'credit' ? 'জমা / ক্রেডিট সম্পন্ন করুন' : 'উত্তোলন / ডেবিট সম্পন্ন করুন'}
+                  {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>
+                    {isSaving
+                      ? 'সংরক্ষণ করা হচ্ছে...'
+                      : modalType === 'credit'
+                      ? 'জমা / ক্রেডিট সম্পন্ন করুন'
+                      : 'উত্তোলন / ডেবিট সম্পন্ন করুন'}
+                  </span>
                 </button>
               </div>
             </form>
@@ -652,6 +776,144 @@ export const BankSection: React.FC<BankSectionProps> = ({
           amount={previewSlip.amount}
           date={previewSlip.date}
         />
+      )}
+
+      {/* One-Time Opening Bank Balance Modal */}
+      {isOpeningBalanceModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/75 backdrop-blur-xs overflow-y-auto"
+          onClick={() => !isSavingOpeningBalance && setIsOpeningBalanceModalOpen(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl max-w-lg w-full my-auto shadow-2xl border border-amber-200 flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-amber-100 shrink-0 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950">
+              <div className="flex items-center space-x-3 min-w-0 flex-1">
+                <div className="p-2 sm:p-2.5 rounded-xl bg-white/20 text-slate-950 shrink-0 backdrop-blur-xs shadow-xs">
+                  <Wallet className="w-6 h-6" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-base sm:text-lg font-black leading-snug">
+                    পূর্বের ব্যাংক স্থিতি যুক্ত করুন (One-time Initial Balance)
+                  </h3>
+                  <p className="text-xs text-slate-900/80 font-medium mt-0.5">
+                    সফটওয়্যার চালুর আগে ব্যাংকে থাকা পূর্ববর্তী জমার পরিমাণ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSavingOpeningBalance}
+                onClick={() => setIsOpeningBalanceModalOpen(false)}
+                className="text-slate-900/70 hover:text-slate-950 hover:bg-black/10 w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg cursor-pointer shrink-0 ml-2"
+                title="বন্ধ করুন"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleAddOpeningBalance} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+                
+                {/* 1-time warning card */}
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200/80 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-900 space-y-1">
+                    <p className="font-bold text-amber-950">
+                      ⚠️ এটি শুধুমাত্র একবার (১ বার) ব্যবহার করা যাবে
+                    </p>
+                    <p className="text-amber-800 leading-relaxed">
+                      স্কুলের ব্যাংক অ্যাকাউন্টে আগে থেকে থাকা রানিং ব্যালেন্স এখানে এন্ট্রি করুন। একবার সেভ হয়ে গেলে এই প্রারম্ভিক ব্যালেন্স স্থায়ীভাবে জমা হিসেবে সেট হবে এবং এই বাটনটি স্বয়ংক্রিয়ভাবে লক হয়ে যাবে।
+                    </p>
+                  </div>
+                </div>
+
+                {/* Amount */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    পূর্বের জমার টাকার পরিমাণ (৳) *
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-base">
+                      ৳
+                    </span>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="any"
+                      value={openingBalanceAmount}
+                      onChange={(e) => setOpeningBalanceAmount(e.target.value)}
+                      placeholder="যেমন: ৫০,০০০"
+                      className="w-full pl-9 pr-4 py-2.5 text-base font-bold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-hidden transition-all shadow-xs font-mono"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    বর্তমান ব্যাংক স্টেটমেন্ট অনুযায়ী প্রারম্ভিক মোট স্থিতি লিখুন।
+                  </p>
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    স্থিতির কার্যকর তারিখ *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={openingBalanceDate}
+                    onChange={(e) => setOpeningBalanceDate(e.target.value)}
+                    className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-hidden transition-all shadow-xs"
+                  />
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    বিবরণ / নোট (ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="text"
+                    value={openingBalanceNotes}
+                    onChange={(e) => setOpeningBalanceNotes(e.target.value)}
+                    placeholder="যেমন: পূবালী ব্যাংক মোগলগাঁও শাখা হিসাব নং-XXXX পূর্ববর্তী স্থিতি"
+                    className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-hidden transition-all shadow-xs"
+                  />
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                  <span>খাত নাম:</span>
+                  <span className="font-bold text-slate-800">পূর্বের প্রারম্ভিক ব্যাংক স্থিতি</span>
+                </div>
+              </div>
+
+              {/* Sticky Footer */}
+              <div className="flex items-center justify-end space-x-3 p-3.5 sm:p-4 border-t border-slate-100 bg-slate-50/90 shrink-0">
+                <button
+                  type="button"
+                  disabled={isSavingOpeningBalance}
+                  onClick={() => setIsOpeningBalanceModalOpen(false)}
+                  className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOpeningBalance}
+                  className="px-5 py-2 text-sm font-bold text-slate-950 bg-amber-500 hover:bg-amber-600 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-2 disabled:opacity-60 border border-amber-400"
+                >
+                  {isSavingOpeningBalance && <Loader2 className="w-4 h-4 animate-spin text-slate-950" />}
+                  <span>
+                    {isSavingOpeningBalance ? 'সংরক্ষণ করা হচ্ছে...' : 'প্রারম্ভিক ব্যালেন্স নিশ্চিত করুন'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

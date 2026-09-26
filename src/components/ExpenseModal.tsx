@@ -16,6 +16,7 @@ import {
   generateId, 
   generateReceiptNo 
 } from '../utils/formatters';
+import { compressImage } from '../utils/imageCompressor';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -48,20 +49,26 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('ফাইলের সাইজ সর্বোচ্চ ৫ মেগাবাইট (5MB) হতে পারবে');
+      if (file.size > 10 * 1024 * 1024) {
+        alert('ফাইলের সাইজ সর্বোচ্চ ১০ মেগাবাইট (10MB) হতে পারবে');
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setVoucherImage(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 1000, 1000, 0.7);
+        setVoucherImage(compressed);
+      } catch (err) {
+        console.warn('Fallback reading image:', err);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setVoucherImage(reader.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
     }
   };
 

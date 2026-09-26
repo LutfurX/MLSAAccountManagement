@@ -8,7 +8,8 @@ import {
   Shield,
   Users,
   LogOut,
-  Eye
+  Eye,
+  Scale
 } from 'lucide-react';
 import { AppUser } from '../types';
 import { 
@@ -49,7 +50,8 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'fees', label: 'ছাত্র-ছাত্রীদের বেতন (মাসিক)', icon: Wallet },
     { id: 'expenses', label: 'দৈনিক খরচ ও হিসাব', icon: ArrowDownRight },
     { id: 'bank', label: 'ব্যাংক ব্যালেন্স ও হিস্ট্রি', icon: Landmark },
-    { id: 'monthly', label: 'মাসিক হিসাব ও গড় পর্যালোচনা', icon: Calendar },
+    { id: 'monthly', label: 'মাসিক হিসাব পর্যালোচনা', icon: Calendar },
+    { id: 'audit', label: 'বার্ষিক অডিট ও ব্যালেন্স শিট', icon: Scale },
   ];
 
   return (

@@ -11,7 +11,8 @@ import {
   Receipt, 
   Clock, 
   ChevronRight,
-  GraduationCap
+  GraduationCap,
+  Scale
 } from 'lucide-react';
 import { StudentFee, SchoolExpense, BankTransaction, DayAccountSummary } from '../types';
 import { 
@@ -303,12 +304,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
               চলতি মাসে সংগৃহীত মোট বেতন এবং মোট খরচের পরিসংখ্যান
             </p>
           </div>
-          <button
-            onClick={() => onNavigateTab('monthly')}
-            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-          >
-            পূর্ণাঙ্গ মাসিক রিপোর্ট দেখুন <ChevronRight className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onNavigateTab('audit')}
+              className="text-xs font-bold text-slate-700 hover:text-indigo-700 bg-slate-100 hover:bg-indigo-50 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Scale className="w-3.5 h-3.5 text-indigo-600" />
+              <span>বার্ষিক অডিট শিট</span>
+            </button>
+            <button
+              onClick={() => onNavigateTab('monthly')}
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+            >
+              পূর্ণাঙ্গ মাসিক রিপোর্ট <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mt-5">

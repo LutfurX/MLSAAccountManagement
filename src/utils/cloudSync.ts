@@ -196,7 +196,23 @@ export function subscribeToBankTransactions(
     collection(db, COLLECTIONS.BANK),
     (snap) => {
       const list: BankTransaction[] = [];
-      snap.forEach((d) => list.push(d.data() as BankTransaction));
+      snap.forEach((d) => {
+        const data = d.data() as Partial<BankTransaction>;
+        if (data && data.id) {
+          list.push({
+            id: String(data.id),
+            date: String(data.date || ''),
+            type: (data.type === 'debit' ? 'debit' : 'credit'),
+            amount: Number(data.amount || 0),
+            source: String(data.source || ''),
+            referenceNo: String(data.referenceNo || ''),
+            description: String(data.description || ''),
+            slipImage: data.slipImage || undefined,
+            recordedBy: String(data.recordedBy || 'হিসাবরক্ষণ শাখা'),
+            createdAt: String(data.createdAt || new Date().toISOString()),
+          });
+        }
+      });
       list.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
       callback(list);
     },
@@ -208,12 +224,19 @@ export function subscribeToBankTransactions(
 
 // Save Bank Transaction to Cloud
 export async function saveBankTxToCloud(tx: BankTransaction): Promise<void> {
-  try {
-    const clean = sanitizeForFirestore(tx);
-    await setDoc(doc(db, COLLECTIONS.BANK, tx.id), clean, { merge: true });
-  } catch (err) {
-    console.error('Error saving bank transaction to Firestore:', err);
-  }
+  const clean = sanitizeForFirestore({
+    id: tx.id,
+    date: tx.date,
+    type: tx.type,
+    amount: tx.amount,
+    source: tx.source || '',
+    referenceNo: tx.referenceNo || '',
+    description: tx.description || '',
+    slipImage: tx.slipImage || null,
+    recordedBy: tx.recordedBy || 'হিসাবরক্ষণ শাখা',
+    createdAt: tx.createdAt || new Date().toISOString(),
+  });
+  await setDoc(doc(db, COLLECTIONS.BANK, tx.id), clean, { merge: true });
 }
 
 // Delete Bank Transaction from Cloud
